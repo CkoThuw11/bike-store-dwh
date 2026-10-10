@@ -1,0 +1,189 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .                    
+    dockerfile: airflow/Dockerfile
+  image: bike-store-airflow
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://dwh:${POSTGRES_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # Meltano (extract-load tasks)
+    MELTANO_DATABASE_URI: postgresql://dwh:${POSTGRES_PASSWORD}@postgres:5432/meltano
+    MELTANO_READER_PASSWORD: ${MELTANO_READER_PASSWORD}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # dbt (transform tasks)
+    DBT_POSTGRES_HOST: postgres
+    DBT_POSTGRES_PORT: "5432"
+    DBT_POSTGRES_USER: dwh
+    DBT_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    DBT_POSTGRES_DBNAME: dwh
+    DBT_POSTGRES_SCHEMA: staging
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - airflow_logs:/opt/airflow/logs
+    - ./meltano/meltano.yml:/opt/airflow/meltano/meltano.yml:ro
+    - ./dbt/analytics:/opt/airflow/dbt/analytics:ro
+  restart: unless-stopped
+  depends_on: &airflow-common-depends-on
+    mssql-init:
+      condition: service_completed_successfully
+    postgres-init:
+      condition: service_completed_successfully
+
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: mssql
+    restart: unless-stopped
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql_data:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+          || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -Q "SELECT 1" -b -o /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  mssql-init:
+    image: mcr.microsoft.com/mssql-tools
+    container_name: mssql-init
+    depends_on:
+      mssql:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MELTANO_READER_PASSWORD: ${MELTANO_READER_PASSWORD}
+    volumes:
+      - ./db_script:/scripts:ro
+      - ./mssql:/init:ro
+    entrypoint: ["/bin/bash", "/init/init.sh"]
+
+  postgres:
+    image: postgres:16.15
+    container_name: dwh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dwh
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: dwh
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dwh -d dwh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-init:
+    image: postgres:16.15
+    container_name: postgres-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      METABASE_READER_PASSWORD: ${METABASE_READER_PASSWORD}
+    volumes:
+      - ./postgres:/init:ro
+    entrypoint: ["psql", "-h", "postgres", "-U", "dwh", "-d", "dwh", "-v", "ON_ERROR_STOP=1", "-f", "/init/create_databases.sql"]
+
+  metabase:
+    image: metabase/metabase:v0.64.1
+    container_name: metabase
+    restart: unless-stopped
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: dwh
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    restart: "no"
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow-apiserver
+    command: api-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: airflow-dag-processor
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  mssql_data:
+  pg_data:
+  airflow_logs:

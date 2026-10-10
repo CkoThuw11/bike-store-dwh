@@ -1,0 +1,78 @@
+requires_meltano: ">=4.4,<5"
+default_environment: dev
+project_id: bike-store-dwh
+send_anonymous_usage_stats: false
+
+environments:
+- name: dev
+
+plugins:
+  extractors:
+  - name: tap-mssql
+    variant: buzzcutnorman
+    pip_url: git+https://github.com/BuzzCutNorman/tap-mssql.git@v0.2.1 
+    config:
+      dialect: mssql
+      driver_type: pymssql
+      host: mssql
+      port: 1433
+      database: BikeStores
+      user: meltano_reader
+      password: ${MELTANO_READER_PASSWORD}
+    select:
+    - production-brands.*
+    - production-categories.*
+    - production-products.*
+    - production-stocks.*
+    - sales-stores.*
+    - sales-staffs.*
+    - sales-customers.*
+    - sales-orders.*
+    - sales-order_items.*
+    metadata:
+      # Small tables: full reload every run
+      '*':
+        replication-method: FULL_TABLE
+      # Order tables: new rows only; status changes are picked up by el-orders-full
+      sales-orders:
+        replication-method: INCREMENTAL
+        replication-key: order_id
+      sales-order_items:
+        replication-method: INCREMENTAL
+        replication-key: order_id
+
+  # Weekly full reload of the order tables. Own state, so it never moves the daily bookmark.
+  - name: tap-mssql--orders-full
+    inherit_from: tap-mssql
+    select:
+    - sales-orders.*
+    - sales-order_items.*
+    metadata:
+      sales-orders:
+        replication-method: FULL_TABLE
+      sales-order_items:
+        replication-method: FULL_TABLE
+
+  loaders:
+  - name: target-postgres
+    variant: meltanolabs
+    pip_url: meltanolabs-target-postgres==0.8.0                         
+    config:
+      host: postgres
+      port: 5432
+      database: dwh
+      user: dwh
+      password: ${POSTGRES_PASSWORD}
+      default_target_schema: raw
+      load_method: upsert           
+      add_record_metadata: true    
+      activate_version: false     
+
+jobs:
+- name: el-incremental
+  tasks:
+  - tap-mssql target-postgres
+- name: el-orders-full
+  tasks:
+  - tap-mssql--orders-full target-postgres
+

@@ -1,0 +1,13 @@
+# Connection values come from environment variables set on the dbt container (docker-compose.yaml).
+analytics:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_POSTGRES_HOST') }}"
+      port: "{{ env_var('DBT_POSTGRES_PORT') | int }}"
+      user: "{{ env_var('DBT_POSTGRES_USER') }}"
+      password: "{{ env_var('DBT_POSTGRES_PASSWORD') }}"
+      dbname: "{{ env_var('DBT_POSTGRES_DBNAME') }}"
+      schema: "{{ env_var('DBT_POSTGRES_SCHEMA') }}"
+      threads: 4

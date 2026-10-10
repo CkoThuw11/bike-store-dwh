@@ -1,0 +1,175 @@
+version: 2
+
+models:
+  - name: stg_brands
+    columns:
+      - name: brand_id
+        data_tests: [unique, not_null]
+      - name: brand_name
+        data_tests: [not_null]
+
+  - name: stg_categories
+    columns:
+      - name: category_id
+        data_tests: [unique, not_null]
+      - name: category_name
+        data_tests: [not_null]
+
+  - name: stg_products
+    columns:
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: product_name
+        data_tests: [not_null]
+      - name: brand_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_brands')
+                field: brand_id
+      - name: category_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_categories')
+                field: category_id
+      - name: list_price
+        data_tests:
+          - not_null
+
+  - name: stg_stocks
+    data_tests:
+      - unique:
+          column_name: "(store_id || '-' || product_id)"
+    columns:
+      - name: store_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_stores')
+                field: store_id
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+
+  - name: stg_stores
+    columns:
+      - name: store_id
+        data_tests: [unique, not_null]
+      - name: store_name
+        data_tests: [not_null]
+
+  - name: stg_staffs
+    columns:
+      - name: staff_id
+        data_tests: [unique, not_null]
+      - name: email
+        data_tests: [unique, not_null]
+      - name: is_active
+        data_tests: [not_null]
+      - name: store_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_stores')
+                field: store_id
+      - name: manager_id
+        description: NULL for the top manager.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_staffs')
+                field: staff_id
+
+  - name: stg_customers
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: email
+        data_tests: [not_null]
+      - name: phone
+        description: Often NULL in the source.
+
+  - name: stg_orders
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_customers')
+                field: customer_id
+      - name: order_status_code
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+                quote: false
+      - name: order_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Pending", "Processing", "Rejected", "Completed"]
+      - name: order_date
+        data_tests: [not_null]
+      - name: required_date
+        data_tests: [not_null]
+      - name: shipped_date
+        description: NULL unless Completed.
+      - name: store_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_stores')
+                field: store_id
+      - name: staff_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_staffs')
+                field: staff_id
+
+  - name: stg_order_items
+    data_tests:
+      - unique:
+          column_name: "(order_id || '-' || item_id)"
+    columns:
+      - name: order_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: item_id
+        data_tests: [not_null]
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_products')
+                field: product_id
+      - name: quantity
+        data_tests:
+          - not_null
+      - name: list_price
+        data_tests:
+          - not_null
+      - name: discount
+        data_tests:
+          - not_null

@@ -1,0 +1,113 @@
+version: 2
+
+models:
+  - name: fct_order_items
+    description: >
+      One row per order line item. net_revenue = quantity * list_price * (1 - discount), using the line's price.
+      booked_revenue (status <> Rejected) is the headline KPI; completed_revenue counts Completed only.
+      Order status may lag up to one full-reload interval (see order_extracted_at).
+    data_tests:
+      - unique:
+          column_name: "(order_id || '-' || item_id)"
+    columns:
+      - name: order_id
+        data_tests: [not_null]
+      - name: item_id
+        data_tests: [not_null]
+      - name: order_date
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_day
+      - name: product_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_id
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: store_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_store')
+                field: store_id
+      - name: staff_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_staff')
+                field: staff_id
+      - name: order_status_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_order_status')
+                field: order_status_code
+      - name: order_status
+        data_tests: [not_null]
+      - name: is_booked
+        data_tests: [not_null]
+      - name: is_completed
+        data_tests: [not_null]
+      - name: net_revenue
+        data_tests: [not_null]
+      - name: booked_revenue
+        data_tests: [not_null]
+      - name: completed_revenue
+        data_tests: [not_null]
+
+  - name: dim_date
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: dim_product
+    columns:
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: brand_name
+        data_tests: [not_null]
+      - name: category_name
+        data_tests: [not_null]
+
+  - name: dim_customer
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+
+  - name: dim_store
+    columns:
+      - name: store_id
+        data_tests: [unique, not_null]
+
+  - name: dim_staff
+    columns:
+      - name: staff_id
+        data_tests: [unique, not_null]
+      - name: store_name
+        data_tests: [not_null]
+
+  - name: dim_order_status
+    columns:
+      - name: order_status_code
+        data_tests: [unique, not_null]
+      - name: order_status
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["Pending", "Processing", "Rejected", "Completed"]

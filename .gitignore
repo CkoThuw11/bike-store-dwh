@@ -1,0 +1,31 @@
+# --- Credentials --------------------------------------------------------------
+.env
+
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- dbt (only created when dbt runs on the host; in Docker they go to /tmp) ----
+dbt/analytics/target/
+dbt/analytics/logs/
+dbt/analytics/dbt_packages/
+.user.yml
+
+# --- Meltano (plugins and state live in the Airflow image / Postgres) ------------
+meltano/.meltano/
+meltano/plugins/
+
+# --- Airflow (logs are in the airflow_logs Docker volume) -----------------------
+airflow/logs/
+
+# --- Backups and local dumps (contain real data) --------------------------------
+*_backup.sql
+*.dump
+
+# --- Editors and OS -------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
